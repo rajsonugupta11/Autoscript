@@ -4,19 +4,29 @@ import brotli
 import gzip
 import random
 import re
-import os
+import requests
+import time
 from colorama import init as colorama_init, Fore, Style
 from flask import Flask
 from threading import Thread
 
-# -----------------------------------------
-# CONFIG SECTION
-# -----------------------------------------
-colorama_init(autoreset=True)
+# ---------------- Flask keep-alive (Replit) ----------------
+app = Flask('')
 
-# 👇 Replace YOUR_USERNAME with your GitHub username and repo name
-GITHUB_TOKENS_URL = "https://raw.githubusercontent.com/YOUR_USERNAME/kaisar-bot-data/main/tokens.txt"
-PING_PORT = int(os.getenv("PORT", 8080))  # Railway sets PORT automatically
+@app.route('/')
+def home():
+    return "✅ Script is alive and running!"
+
+def run():
+    app.run(host='0.0.0.0', port=8080)
+
+def keep_alive():
+    t = Thread(target=run)
+    t.start()
+# -----------------------------------------------------------
+
+# Colorama init
+colorama_init(autoreset=True)
 
 BALANCE_URL = "https://zero-api.kaisar.io/user/balances?symbol=point"
 SPIN_URL = "https://zero-api.kaisar.io/lucky/spin"
@@ -36,26 +46,13 @@ USER_AGENTS = [
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 13_5_1) Chrome/116.0.5845.97 Safari/537.36",
     "Mozilla/5.0 (Linux; Android 12; SM-G991B) Chrome/115.0.5790.171 Mobile Safari/537.36",
     "Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) Chrome/115.0.5790.171 Mobile Safari/604.1",
+    "Mozilla/5.0 (Linux; Android 13; Pixel 7) Chrome/115.0.5790.171 Mobile Safari/537.36",
+    "Mozilla/5.0 (Windows NT 11.0; Win64; x64) Chrome/116.0.5845.97 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 13_5_1) Safari/537.36",
+    "Mozilla/5.0 (Linux; Android 12; OnePlus9) Chrome/116.0.5845.97 Mobile Safari/537.36",
+    "Mozilla/5.0 (Linux; Android 11; SM-A716B) Chrome/115.0.5790.171 Mobile Safari/537.36"
 ]
 
-# -----------------------------------------
-# KEEP ALIVE SERVER (For Railway ping)
-# -----------------------------------------
-app = Flask('')
-
-@app.route('/')
-def home():
-    return "✅ Bot is running!"
-
-def run_server():
-    app.run(host='0.0.0.0', port=PING_PORT)
-
-def keep_alive():
-    Thread(target=run_server).start()
-
-# -----------------------------------------
-# MAIN LOGIC FUNCTIONS
-# -----------------------------------------
 
 def get_headers(token):
     return {
@@ -80,19 +77,6 @@ async def decode_response(resp):
         pass
     return raw_data.decode("utf-8", errors="ignore")
 
-async def fetch_tokens():
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(GITHUB_TOKENS_URL) as resp:
-                if resp.status == 200:
-                    text = await resp.text()
-                    tokens = [t.strip() for t in text.splitlines() if t.strip()]
-                    print(f"{Fore.GREEN}✅ Tokens fetched: {len(tokens)}{Style.RESET_ALL}")
-                    return tokens
-    except Exception as e:
-        print(f"{Fore.RED}Failed to fetch tokens: {e}{Style.RESET_ALL}")
-    return []
-
 async def is_token_valid(session, headers):
     try:
         async with session.get(BALANCE_URL, headers=headers) as resp:
@@ -107,7 +91,7 @@ async def check_balance(session, headers, name, color):
             match = re.search(r'"balance":"?([\d.]+)"?', decoded)
             if match:
                 balance = float(match.group(1))
-                print(f"{color}[{name}] 💰 Balance: {Fore.YELLOW}{balance}{Style.RESET_ALL}")
+                print(f"{color}[{name}] 💰 Current balance: {Fore.YELLOW}{balance}")
                 return balance
     except:
         pass
@@ -118,9 +102,9 @@ async def buy_ticket(session, headers, count, name, color):
         if count <= 0:
             return
         await session.post(CONVERT_URL, headers=headers, json={})
-        print(f"{color}[{name}] 🎟 Ticket purchased.{Style.RESET_ALL}")
+        print(f"{color}[{name}] 🎟 Ticket purchased: {count}")
     except Exception as e:
-        print(f"{color}[{name}] {Fore.RED}Ticket buy error: {e}{Style.RESET_ALL}")
+        print(f"{color}[{name}] ❌ Ticket error: {e}")
 
 async def spin(session, headers, sem):
     async with sem:
@@ -136,57 +120,54 @@ async def worker(token, target, name, color):
     sem = asyncio.Semaphore(100)
     async with aiohttp.ClientSession(timeout=timeout) as session:
         if not await is_token_valid(session, headers):
-            print(f"{color}[{name}] Invalid token — skipping.{Style.RESET_ALL}")
+            print(f"{color}[{name}] ❌ Invalid token.")
             return
 
         while True:
             balance = await check_balance(session, headers, name, color)
             if balance is None:
+                print(f"{color}[{name}] ⚠ Retrying in 5s...")
                 await asyncio.sleep(5)
                 continue
 
             if balance >= target:
-                print(f"{color}[{name}] 🎯 Target reached!{Style.RESET_ALL}")
+                print(f"{color}[{name}] 🎉 Target achieved! Stopping.")
                 break
 
             if balance >= 300:
                 await buy_ticket(session, headers, 1, name, color)
             else:
-                print(f"{color}[{name}] Waiting (low balance)...{Style.RESET_ALL}")
+                print(f"{color}[{name}] ⚠ Low balance, waiting 50s...")
                 await asyncio.sleep(50)
                 continue
 
             tasks = [spin(session, headers, sem) for _ in range(300)]
             results = await asyncio.gather(*tasks)
             hits = sum(1 for r in results if r == 200)
-            print(f"{color}[{name}] 🎰 Spins done: {hits}{Style.RESET_ALL}")
-            await asyncio.sleep(1)
+            print(f"{color}[{name}] 🎰 Spins done: {Fore.GREEN}{hits}")
+            await asyncio.sleep(0.5)
 
-# -----------------------------------------
-# TOKEN REFRESHER + MAIN RUNNER
-# -----------------------------------------
-async def token_refresher():
-    global TOKENS
+
+async def main_loop():
+    GITHUB_FILE = "https://raw.githubusercontent.com/sonugupta/tokens/main/tokens.txt"
+    target = 1000  # change if needed
     while True:
-        TOKENS = await fetch_tokens()
-        await asyncio.sleep(3600)  # Refresh every 1 hour
+        try:
+            resp = requests.get(GITHUB_FILE)
+            tokens = [t.strip() for t in resp.text.splitlines() if t.strip()]
+            print(f"{Fore.CYAN}🔄 Loaded {len(tokens)} tokens from GitHub")
 
-async def main():
-    keep_alive()
-    print(f"{Fore.CYAN}🚀 Bot started with auto-ping & GitHub tokens.{Style.RESET_ALL}")
+            tasks = []
+            for i, token in enumerate(tokens):
+                color = ACCOUNT_COLORS[i % len(ACCOUNT_COLORS)]
+                tasks.append(worker(token, target, f"Account #{i+1}", color))
+            await asyncio.gather(*tasks)
 
-    TOKENS = await fetch_tokens()
-    if not TOKENS:
-        print(f"{Fore.RED}No tokens found. Exiting...{Style.RESET_ALL}")
-        return
+        except Exception as e:
+            print(f"{Fore.RED}GitHub fetch error: {e}")
+        await asyncio.sleep(300)  # every 5 minutes reload tokens
 
-    target = float(os.getenv("TARGET_POINTS", 1000))  # default target = 1000
-    tasks = []
-    for i, token in enumerate(TOKENS):
-        color = ACCOUNT_COLORS[i % len(ACCOUNT_COLORS)]
-        tasks.append(worker(token, target, f"Account #{i+1}", color))
 
-    await asyncio.gather(*tasks, token_refresher())
-
-asyncio.run(main())
-                  
+# ---------- MAIN ----------
+keep_alive()
+asyncio.run(main_loop())
