@@ -10,7 +10,7 @@ from colorama import init as colorama_init, Fore, Style
 from flask import Flask
 from threading import Thread
 
-# ---------------- Flask keep-alive (Replit) ----------------
+# ---------------- Flask keep-alive (Replit compatible) ----------------
 app = Flask('')
 
 @app.route('/')
@@ -23,9 +23,9 @@ def run():
 def keep_alive():
     t = Thread(target=run)
     t.start()
-# -----------------------------------------------------------
+# ----------------------------------------------------------------------
 
-# Colorama init
+# Colorama setup
 colorama_init(autoreset=True)
 
 BALANCE_URL = "https://zero-api.kaisar.io/user/balances?symbol=point"
@@ -52,7 +52,6 @@ USER_AGENTS = [
     "Mozilla/5.0 (Linux; Android 12; OnePlus9) Chrome/116.0.5845.97 Mobile Safari/537.36",
     "Mozilla/5.0 (Linux; Android 11; SM-A716B) Chrome/115.0.5790.171 Mobile Safari/537.36"
 ]
-
 
 def get_headers(token):
     return {
@@ -147,10 +146,9 @@ async def worker(token, target, name, color):
             print(f"{color}[{name}] 🎰 Spins done: {Fore.GREEN}{hits}")
             await asyncio.sleep(0.5)
 
-
 async def main_loop():
     GITHUB_FILE = "https://raw.githubusercontent.com/sonugupta/tokens/main/tokens.txt"
-    target = 1000  # change if needed
+    target = 1000  # Change as needed
     while True:
         try:
             resp = requests.get(GITHUB_FILE)
@@ -165,9 +163,9 @@ async def main_loop():
 
         except Exception as e:
             print(f"{Fore.RED}GitHub fetch error: {e}")
-        await asyncio.sleep(300)  # every 5 minutes reload tokens
-
+        await asyncio.sleep(300)  # Refresh every 5 minutes
 
 # ---------- MAIN ----------
-keep_alive()
-asyncio.run(main_loop())
+if __name__ == "__main__":
+    keep_alive()
+    asyncio.run(main_loop())
