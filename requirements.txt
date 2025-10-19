@@ -1,0 +1,4 @@
+aiohttp
+brotli
+colorama
+flask
