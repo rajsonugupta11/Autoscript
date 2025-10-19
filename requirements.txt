@@ -1,4 +1,6 @@
 aiohttp
+asyncio
 brotli
 colorama
 flask
+requests
